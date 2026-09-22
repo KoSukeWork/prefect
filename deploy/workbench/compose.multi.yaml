@@ -1,0 +1,122 @@
+name: prefect-workbench
+
+x-runtime: &runtime
+  image: prefect-workbench-runtime:${WORKBENCH_TAG:-local}
+  build:
+    context: ../..
+    dockerfile: deploy/workbench/Dockerfile
+    target: runtime
+  init: true
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+
+x-client: &client
+  PREFECT_API_URL: http://server:4200/api
+  PREFECT_UI_URL: ${PREFECT_PUBLIC_UI_URL:-http://localhost:4200}
+  PREFECT_SERVER_ALLOW_EPHEMERAL_MODE: "false"
+  PREFECT_API_AUTH_STRING: "admin:${PREFECT_PASSWORD:?Run setup.ps1 first}"
+  PREFECT_WORKER_QUERY_SECONDS: "3"
+  PREFECT_WORKER_PREFETCH_SECONDS: "5"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prefect
+      POSTGRES_DB: prefect
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run setup.ps1 first}
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U prefect -d prefect"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    <<: *runtime
+    command: [prefect, server, start, --host, 0.0.0.0]
+    environment:
+      PREFECT_SERVER_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:${POSTGRES_PASSWORD}@postgres:5432/prefect
+      PREFECT_SERVER_API_AUTH_STRING: "admin:${PREFECT_PASSWORD}"
+      PREFECT_SERVER_UI_API_URL: ${PREFECT_PUBLIC_API_URL:-http://localhost:4200/api}
+      PREFECT_SERVER_UI_STATIC_DIRECTORY: /home/app/.prefect/ui
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    ports: ["127.0.0.1:${PREFECT_PORT:-4200}:4200"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4200/api/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  init-workspace:
+    <<: *runtime
+    restart: "no"
+    command: [python, /usr/local/bin/workbench, init]
+    volumes: [workspace:/workspace]
+
+  worker:
+    <<: *runtime
+    command: [prefect, worker, start, --pool, local-process, --type, process, --limit, "${WORKER_LIMIT:-4}", --install-policy, never, --with-healthcheck]
+    environment: *client
+    volumes: [workspace:/workspace, business-env:/opt/workbench-env:ro]
+    stop_grace_period: 60s
+    depends_on:
+      server: {condition: service_healthy}
+      init-workspace: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  editor:
+    <<: *runtime
+    image: prefect-workbench-editor:${WORKBENCH_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: deploy/workbench/Dockerfile
+      target: editor
+    environment:
+      <<: *client
+      PASSWORD: ${EDITOR_PASSWORD:?Run setup.ps1 first}
+      PATH: /opt/workbench/bin:/opt/venv/bin:/usr/local/bin:/usr/bin:/bin
+    ports: ["127.0.0.1:${EDITOR_PORT:-8080}:8080"]
+    volumes:
+      - workspace:/workspace
+      - editor-data:/home/app/.local/share/code-server
+      - business-env:/opt/workbench-env:ro
+    depends_on:
+      worker: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  manager:
+    <<: *runtime
+    command: [/opt/venv/bin/python, -m, uvicorn, app:app, --app-dir, /opt/workbench/manager, --host, 0.0.0.0, --port, "8090"]
+    environment: *client
+    ports: ["127.0.0.1:${MANAGER_PORT:-8090}:8090"]
+    volumes: [workspace:/workspace, business-env:/opt/workbench-env]
+    depends_on:
+      worker: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, /opt/venv/bin/python, -c, "import socket; socket.create_connection(('127.0.0.1', 8090), 3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+volumes:
+  database:
+  workspace:
+  editor-data:
+  business-env:

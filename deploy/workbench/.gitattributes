@@ -1,0 +1,3 @@
+*.sh text eol=lf
+Dockerfile text eol=lf
+manager/python text eol=lf

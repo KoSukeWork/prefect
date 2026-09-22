@@ -1,0 +1,13 @@
+#!/opt/venv/bin/python
+"""Resolve the shared environment once; existing processes keep their interpreter."""
+
+import os
+import sys
+from pathlib import Path
+
+active = Path("/opt/workbench-env/current/.venv/bin/python")
+python = str(active.absolute()) if active.exists() else "/opt/venv/bin/python"
+# Resolve the generation directory, not the venv's python symlink to system Python.
+if active.exists():
+    python = str(Path("/opt/workbench-env/current").resolve() / ".venv/bin/python")
+os.execv(python, [python, *sys.argv[1:]])

@@ -1,0 +1,8 @@
+.env
+acceptance-results.json
+manager-acceptance-results.json
+single-acceptance-results.json
+*.log
+backups/
+!seed/.vscode/
+!seed/.vscode/tasks.json

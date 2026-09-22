@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Prefect: register flow",
+      "type": "process",
+      "command": "/opt/workbench/bin/python",
+      "args": ["/usr/local/bin/workbench", "deploy", "${input:entrypoint}", "--name", "${input:deployment}"],
+      "problemMatcher": [],
+      "presentation": {"reveal": "always", "panel": "dedicated"}
+    }
+  ],
+  "inputs": [
+    {"id": "entrypoint", "type": "promptString", "description": "Flow file:function", "default": "flows/hello.py:hello"},
+    {"id": "deployment", "type": "promptString", "description": "Deployment name", "default": "local"}
+  ]
+}
