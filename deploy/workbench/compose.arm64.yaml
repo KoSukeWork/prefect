@@ -1,0 +1,38 @@
+name: prefect-workbench
+services:
+  workbench:
+    image: prefect-workbench:${WORKBENCH_TAG:-arm64}
+    platform: linux/arm64
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    stop_grace_period: 60s
+    environment:
+      DO_NOT_TRACK: "1"
+      PREFECT_PASSWORD: ${PREFECT_PASSWORD:?Set PREFECT_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${PREFECT_PASSWORD:?Set PREFECT_PASSWORD in .env}}
+      WORKER_LIMIT: ${WORKER_LIMIT:-4}
+      PREFECT_API_URL: http://127.0.0.1:4200/api
+      PREFECT_API_AUTH_STRING: "admin:${PREFECT_PASSWORD}"
+      PREFECT_UI_URL: ${WORKBENCH_PUBLIC_URL:?Set WORKBENCH_PUBLIC_URL in .env}/prefect
+      PREFECT_SERVER_ALLOW_EPHEMERAL_MODE: "false"
+      WORKBENCH_PUBLIC_URL: ${WORKBENCH_PUBLIC_URL:?Set WORKBENCH_PUBLIC_URL in .env}
+    ports: ["${WORKBENCH_BIND:-0.0.0.0}:${WORKBENCH_PORT:-8090}:8090"]
+    volumes:
+      - database-single:/var/lib/workbench-postgres
+      - workspace:/workspace
+      - business-env:/opt/workbench-env
+      - editor-data:/home/app/.local/share/code-server
+    healthcheck:
+      test: [CMD, /opt/venv/bin/python, /opt/workbench/standalone/health.py]
+      interval: 10s
+      timeout: 15s
+      retries: 20
+      start_period: 180s
+volumes:
+  database-single:
+  workspace:
+  business-env:
+  editor-data:
